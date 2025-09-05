@@ -260,14 +260,53 @@ function MPOWA:GetDuration(index, cat)
 end
 
 function MPOWA:GetCooldown(buff)
-	-- First try to get spell cooldown by name (works for both spellbook and talent spells)
-	local start, duration, enabled = GetSpellCooldown(buff)
+	-- Try to find the spell slot first (works for spellbook spells)
+	local slot = self:GetSpellSlot(buff)
+	local start, duration, enabled = 0, 0, 0
 
-	-- If that didn't work, try the old method with spell slots
-	if (not start or start == 0) and (not duration or duration == 0) then
-		local slot = self:GetSpellSlot(buff)
-		if slot > 0 then
-			start, duration, enabled = GetSpellCooldown(slot, "spell")
+	if slot > 0 then
+		start, duration, enabled = GetSpellCooldown(slot, "spell")
+	else
+		-- If not found in spellbook, try to find it by iterating through all possible spell slots
+		-- This is needed for talent spells that aren't in the regular spellbook
+		for i = 1, 1000 do
+			local spellName = GetSpellName(i, "spell")
+			if not spellName then
+				break -- No more spells
+			end
+			if strfind(strlower(spellName), strlower(buff)) or spellName == buff then
+				start, duration, enabled = GetSpellCooldown(i, "spell")
+				break
+			end
+		end
+
+		-- If still not found, try checking known spell names with GetSpellCooldown directly
+		-- This handles some edge cases in WoW Classic
+		if (not start or start == 0) and (not duration or duration == 0) then
+			-- Try common variations of the spell name
+			local variations = {
+				buff,
+				string.lower(buff),
+				string.upper(string.sub(buff, 1, 1)) .. string.lower(string.sub(buff, 2))
+			}
+			for _, variation in variations do
+				-- Try to find the spell by scanning the spellbook with exact name match
+				for j = 1, 1000 do
+					local spellName = GetSpellName(j, "spell")
+					if not spellName then
+						break
+					end
+					if spellName == variation then
+						start, duration, enabled = GetSpellCooldown(j, "spell")
+						if start and start > 0 then
+							break
+						end
+					end
+				end
+				if start and start > 0 then
+					break
+				end
+			end
 		end
 	end
 
@@ -279,23 +318,9 @@ function MPOWA:GetCooldown(buff)
 	end
 
 	-- Only check items if we're sure this isn't a spell name
-	-- This prevents talent spells from falling back to item detection
-	local slot = self:GetSpellSlot(buff)
 	if slot > 0 then
 		-- Found the spell in spellbook, so don't check items
 		return 0
-	end
-
-	-- Check if the buff name could be a spell name by trying some variations
-	local variations = { buff, string.lower(buff), string.upper(string.sub(buff, 1, 1)) ..
-	string.lower(string.sub(buff, 2)) }
-	for _, variation in variations do
-		start, duration = GetSpellCooldown(variation)
-		if start and start > 0 and duration and duration > 2 then
-			return ((start or 0) + (duration or 0)) - GT() + 1
-		elseif start and start > 0 and duration then
-			return 0
-		end
 	end
 
 	-- Only now check inventory items if no spell was found at all
@@ -343,17 +368,17 @@ function MPOWA:GetSpellSlot(buff)
 		if not name then
 			-- Debug: Print when we reach end of spellbook without finding the spell
 			if buff and buff ~= "" then
-				DEFAULT_CHAT_FRAME:AddMessage("MPOWA: Spell '" .. buff .. "' not found in spellbook")
+				-- DEFAULT_CHAT_FRAME:AddMessage("MPOWA: Spell '" .. buff .. "' not found in spellbook")
 			end
 			return 0 -- No more spells, spell not found
 		end
 		if strfind(strlower(name), strlower(buff)) or name == buff then
 			-- Debug: Print when we find the spell
-			DEFAULT_CHAT_FRAME:AddMessage("MPOWA: Found spell '" .. name .. "' at slot " .. i)
+			-- DEFAULT_CHAT_FRAME:AddMessage("MPOWA: Found spell '" .. name .. "' at slot " .. i)
 			return i
 		end
 		if i > 1000 then
-			DEFAULT_CHAT_FRAME:AddMessage("MPOWA: Gave up searching for '" .. buff .. "' after 1000 slots")
+			-- DEFAULT_CHAT_FRAME:AddMessage("MPOWA: Gave up searching for '" .. buff .. "' after 1000 slots")
 			return 0 -- Lets give up at this point
 		end
 		i = i + 1
